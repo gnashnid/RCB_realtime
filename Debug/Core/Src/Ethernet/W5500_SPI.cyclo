@@ -1,0 +1,7 @@
+../Core/Src/Ethernet/W5500_SPI.c:14:6:wizchip_select	1
+../Core/Src/Ethernet/W5500_SPI.c:19:6:wizchip_deselect	1
+../Core/Src/Ethernet/W5500_SPI.c:24:9:wizchip_read	1
+../Core/Src/Ethernet/W5500_SPI.c:31:6:wizchip_write	1
+../Core/Src/Ethernet/W5500_SPI.c:36:6:wizchip_readburst	1
+../Core/Src/Ethernet/W5500_SPI.c:42:6:wizchip_writeburst	1
+../Core/Src/Ethernet/W5500_SPI.c:48:6:W5500Init	3
