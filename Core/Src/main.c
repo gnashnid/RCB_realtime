@@ -77,7 +77,7 @@ uint32_t SectorError, wcode, TxMailbox, x_timer[64], number_card, connected, tim
 		 lock_default_1, lock_default_2, time_check, time_auto_reconnect, heardbit_REB, timeSendDataEth,
 		 RST_timer, RST_timer_now, RST_timer_last, count_RST, counter_reset, time_now;
 bool bypass_from_REB, bypass_from_Eth, x[64], Ethernet_connected, isSendDataEth, write_mode_somecard,
-	 write_mode, erase_done, write_done, new_card, send_card_to_pc, send_card_done,
+	 write_mode, write_done, new_card, send_card_to_pc, send_card_done,
 	 linkport, REB_connected = true, Ethernet_received, Ethernet_setting, add_card_uart,
 	 Ethernet_read_and_reset, RST_set, unlock_fire, send_uart_to_REB, send_uart_to_PC;
 
@@ -151,31 +151,11 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
 		{
 		case 0x44: //Data: D
 			wcode = uart_data[1]<<24|uart_data[2]<<16|uart_data[3]<<8|uart_data[4];
-			if (!erase_done)
+			if (!write_mode && !write_mode_somecard)
 			{
-				if (Ethernet_connected)
-				{
-					sendData_eth("D", wcode);
-					isSendDataEth = true;
-					timeSendDataEth = HAL_GetTick();
-				} else
-				{
-					compare_user = binary_search(number_card, wcode);
-					if (compare_user.STT)
-					{
-						new_card_update(compare_user.permis, x, x_timer);
-						sendData_uart("I", 1);
-	//					send_uart = 1;
-	//					send_uart_to_REB = true;
-	//					time_send_uart = HAL_GetTick();
-					} else
-					{
-						sendData_uart("I", 0);
-	//					send_uart = 0;
-	//					send_uart_to_REB = true;
-	//					time_send_uart = HAL_GetTick();
-					}
-				}
+				sendData_eth("D", wcode);
+				isSendDataEth = true;
+				timeSendDataEth = HAL_GetTick();
 			}
 			break;
 		case 0x43://Comand: C
@@ -291,7 +271,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 		{
 			counter_start++;
 		}
-		if (erase_done || unlock_fire || bypass_from_Eth || bypass_from_REB || !REB_connected || !HAL_GPIO_ReadPin(BYPASS_GPIO_Port, BYPASS_Pin))
+		if (write_mode || write_mode_somecard || unlock_fire || bypass_from_Eth || bypass_from_REB || !REB_connected || !HAL_GPIO_ReadPin(BYPASS_GPIO_Port, BYPASS_Pin))
 		{
 			data_MC2B[0] = 1;
 			data_MC2B[1] = 0;
@@ -382,7 +362,6 @@ int main(void)
   MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
   HAL_TIM_Base_Start_IT(&htim3);
-//  HAL_TIM_Base_Start_IT(&htim2);
   HAL_UARTEx_ReceiveToIdle_DMA(&huart1, uart_data, 50);
   __HAL_DMA_DISABLE_IT(&hdma_usart1_rx, DMA_IT_HT);
   TxHeader_MC2B.DLC = 8;
@@ -572,15 +551,6 @@ int main(void)
 	  }
 
 	  // check connection Ethernet
-
-//	  connected = HAL_GetTick();
-//	  if (abs(HAL_GetTick() - connected) > Timeout_heartbit)
-//	  {
-//		  Ethernet_connected = false;// false
-//	  } else
-//	  {
-//		  Ethernet_connected = true;
-//	  }
 	  if (keepalive == SOCK_ESTABLISHED && (abs(HAL_GetTick() - connected) < Timeout_heartbit))
 	  {
 		  Ethernet_connected = true;
@@ -596,11 +566,6 @@ int main(void)
 	  {
 		  REB_connected = true;
 	  }
-//	  if ((abs(HAL_GetTick() - heardbit_REB) < 90) && send_uart_to_REB)
-//	  {
-//		  send_uart_to_REB = false;
-//		  sendData_uart("I", send_uart);
-//	  }
 	  //// received data from Ethernet
 	  if (Ethernet_received)// 0x44
 	  {
@@ -608,24 +573,22 @@ int main(void)
 		  switch (Ethernet_received_data[0])
 		  {
 		  case 0:
-//			  sendData_uart("I", 0);
 			  send_uart = 0;
 			  send_uart_to_REB = true;
-//				time_send_uart = HAL_GetTick();
+			  isSendDataEth = false;
 			  break;
 		  case 1: // data ok
-			  new_card_update(&Ethernet_received_data[1], x, x_timer);//buf[2]
-//			  sendData_uart("I", 1);
+			  new_card_update(&Ethernet_received_data[1], x, x_timer);
 			  send_uart = 1;
 			  send_uart_to_REB = true;
-//				time_send_uart = HAL_GetTick();
+			  isSendDataEth = false;
 			  break;
 		  }
 	  }
 
 	  // Nếu không nhận được Data từ server sau khi gửi mã thẻ, thì xử lý offline
 
-	  if ((isSendDataEth == true) && ((HAL_GetTick() - timeSendDataEth) > 500))
+	  if (((isSendDataEth == true) && !Ethernet_connected) || ((isSendDataEth == true) && ((HAL_GetTick() - timeSendDataEth) > 500)))
 	  {
 		  isSendDataEth = false;
 		  compare_user = binary_search(number_card, wcode);
@@ -634,11 +597,13 @@ int main(void)
 			  if ((compare_user.time_up < time_now) && (compare_user.time_dow > time_now))
 			  {
 				  new_card_update(compare_user.permis, x, x_timer);
-				  sendData_uart("I", 1);
+				  send_uart = 1;
+				  send_uart_to_REB = true;
 			  }
 		  } else
 		  {
-			  sendData_uart("I", 0);
+			  send_uart = 0;
+			  send_uart_to_REB = true;
 		  }
 	  }
 	  //// setting from PC Ethernet
@@ -771,24 +736,10 @@ int main(void)
 				  W25Q_FastRead_address(i*24, sizeof(user_info_t), (uint8_t *)&send_user);
 				  sendData_eth_CardID ("X", send_user);
 				  HAL_Delay(100);
-//				  send_card_done = false;
-//				  while (!send_card_done)
-//				  {
-//					  if ((abs(HAL_GetTick() - time_break) > Timeout_online))
-//					  {
-//						  send_card_done = true;
-//						  send_card_to_pc = false;
-//					  }
-//				  }
-				  if (i == number_card - 1)
-				  {
-//					  sendString("R", "CMPLT");
-					  send_u8_eth("X", 1);
-//					  send_card_done = true;
-					  send_card_to_pc = false;
-					  break;
-				  }
 			  }
+//					  sendString("R", "CMPLT");
+			  send_u8_eth("X", 1);
+			  send_card_to_pc = false;
 		  }
 	  }
 	  while (write_mode)
