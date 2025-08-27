@@ -782,8 +782,8 @@ int main(void)
 							  write_user.permis[5] = buf[11];
 							  write_user.permis[6] = buf[12];
 							  write_user.permis[7] = buf[13];
-							  write_user.time_up = mktime((buf[16]<<8) & buf[17], buf[15], buf[14], buf[18], buf[19]);
-							  write_user.time_dow = mktime((buf[22]<<8) & buf[23], buf[21], buf[20], buf[24], buf[25]);
+							  write_user.time_up = mktime((buf[16]<<8) | buf[17], buf[15], buf[14], buf[18], buf[19]);
+							  write_user.time_dow = mktime((buf[22]<<8) | buf[23], buf[21], buf[20], buf[24], buf[25]);
 
 							  W25Q_Write_Nbytes((totalCard-1)*24 + 0x210000, (uint8_t *)&write_user, sizeof(user_info_t));
 							  sendString("W", "DOK");
@@ -882,8 +882,8 @@ int main(void)
 							  write_user.permis[5] = buf[11];
 							  write_user.permis[6] = buf[12];
 							  write_user.permis[7] = buf[13];
-							  write_user.time_up = mktime((buf[16]<<8) & buf[17], buf[15], buf[14], buf[18], buf[19]);
-							  write_user.time_dow = mktime((buf[22]<<8) & buf[23], buf[21], buf[20], buf[24], buf[25]);
+							  write_user.time_up = mktime((buf[16]<<8) | buf[17], buf[15], buf[14], buf[18], buf[19]);
+							  write_user.time_dow = mktime((buf[22]<<8) | buf[23], buf[21], buf[20], buf[24], buf[25]);
 
 							  W25Q_Write_Nbytes((add_card-1)*24 + 0x210000, (uint8_t *)&write_user, sizeof(user_info_t));
 							  sendString("W", "DOK");
@@ -1662,17 +1662,11 @@ uint8_t reconect_eth(uint8_t sn)
 //	bool linkport = false;
 	uint8_t Status_SN;
 	Status_SN = getSn_SR(sn);
-	if (wizphy_getphylink() == PHY_LINK_OFF)
+	if ((Status_SN == SOCK_CLOSE_WAIT) || (wizphy_getphylink() == PHY_LINK_OFF))
 	{
 		HAL_GPIO_WritePin(LED_STT_ETH_GPIO_Port, LED_STT_ETH_Pin, GPIO_PIN_RESET);
-//		close(sn);
 		disconnect(sn);
-	}
-	if (Status_SN == SOCK_CLOSE_WAIT)
-	{
-		HAL_GPIO_WritePin(LED_STT_ETH_GPIO_Port, LED_STT_ETH_Pin, GPIO_PIN_RESET);
-//		close(sn);
-		disconnect(sn);
+		Status_SN = getSn_SR(sn);
 	}
 	if (wizphy_getphylink() == PHY_LINK_ON && Status_SN == SOCK_CLOSED)
 	{
@@ -1680,9 +1674,9 @@ uint8_t reconect_eth(uint8_t sn)
 		HAL_GPIO_WritePin(LED_STT_ETH_GPIO_Port, LED_STT_ETH_Pin, GPIO_PIN_RESET);
 		socket(sn, Sn_MR_TCP, port_client, SF_TCP_NODELAY);
 		connect(sn, server_ip, port_server);
+		Status_SN = getSn_SR(sn);
 		counter_reset++;
 	}
-	Status_SN = getSn_SR(sn);
 	if (Status_SN == SOCK_ESTABLISHED)
 	{
 		HAL_GPIO_WritePin(LED_STT_ETH_GPIO_Port, LED_STT_ETH_Pin, GPIO_PIN_SET);

@@ -27,7 +27,7 @@
 ../Core/Src/main.c:1595:6:shift_left_1bit	2
 ../Core/Src/main.c:1608:6:calculate_data_can	14
 ../Core/Src/main.c:1660:9:reconect_eth	6
-../Core/Src/main.c:1693:6:Set_speed_can	4
-../Core/Src/main.c:1734:16:is_leap_year	4
-../Core/Src/main.c:1749:10:mktime	5
-../Core/Src/main.c:1782:6:Error_Handler	1
+../Core/Src/main.c:1687:6:Set_speed_can	4
+../Core/Src/main.c:1728:16:is_leap_year	4
+../Core/Src/main.c:1743:10:mktime	5
+../Core/Src/main.c:1776:6:Error_Handler	1
