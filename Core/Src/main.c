@@ -48,6 +48,10 @@ FLASH_EraseInitTypeDef EraseInit;
 #define SOCK_NUM 0
 #define Timeout_online 1000*10
 #define Timeout_heartbit 10000
+#define Page 256
+#define Sector 16*256
+#define Block32 0x200000
+#define Block63 0x3F0000
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
@@ -68,22 +72,22 @@ DMA_HandleTypeDef hdma_usart1_rx;
 CAN_RxHeaderTypeDef RxHeader;
 CAN_TxHeaderTypeDef TxHeader_MC2B;
 
-uint8_t uart_data[50], buf[1024], server_ip[4], time_delay, lock_default[8], ip1, ip2, ip3, ip4,
+uint8_t uart_data[50], buf[520], server_ip[4], time_delay, lock_default[8], ip1, ip2, ip3, ip4,
 		ip_server1, ip_server2, ip_server3, ip_server4, data_info[30], elevator_mode, uart_bypass = 3,
-		data_MC2B[8], permission_REBcard[8] = {0xFF}, c[2]={0x48, 0}, keepalive, Ethernet_received_data[9],
+		data_MC2B[8], c[2]={0x48, 0}, keepalive, Ethernet_received_data[9],
 		Ethernet_setting_data[25], Ethernet_read_and_reset_data, counter_start, RxData[8], send_uart;
 uint16_t port_server, port_client;
 uint32_t SectorError, wcode, TxMailbox, x_timer[64], number_card, connected, time_break, lenData, number_card_old,
-		 lock_default_1, lock_default_2, time_check, time_auto_reconnect, heardbit_REB, timeSendDataEth,
-		 RST_timer, RST_timer_now, RST_timer_last, count_RST, counter_reset, time_now;
+		 lock_default_1, lock_default_2, time_check, heardbit_REB, timeSendDataEth,
+		 RST_timer, RST_timer_now, RST_timer_last, count_RST, counter_reset, timeNow, timeBegin, timeEnd;
 bool bypass_from_REB, bypass_from_Eth, x[64], Ethernet_connected, isSendDataEth, write_mode_somecard,
-	 write_mode, write_done, new_card, send_card_to_pc, send_card_done,
-	 linkport, REB_connected = true, Ethernet_received, Ethernet_setting, add_card_uart,
+	 write_mode, write_done, new_card, send_card_to_pc, send_card_done, new_wcode,
+	 REB_connected = true, Ethernet_received, Ethernet_setting, add_card_uart, write_card_by_hand,
 	 Ethernet_read_and_reset, RST_set, unlock_fire, send_uart_to_REB, send_uart_to_PC;
 
 
 // Định nghĩa năm epoch (ví dụ: 1/1/2000 00:00:00)
-#define EPOCH_YEAR 2025
+#define EPOCH_YEAR 2020
 // Số ngày trong các tháng (không tính năm nhuận)
 static const int days_in_month[] = {
     31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31
@@ -96,14 +100,24 @@ typedef struct {
 	uint32_t STT;
 	uint32_t cardID;
 	uint8_t permis[8];
-	uint32_t time_up;
-	uint32_t time_dow;
+	uint16_t beginYear;
+	uint8_t beginMonth;
+	uint8_t beginDate;
+	uint8_t beginHour;
+	uint8_t beginMinute;
+	uint16_t endYear;
+	uint8_t endMonth;
+	uint8_t endDate;
+	uint8_t endHour;
+	uint8_t endMinute;
+	uint32_t spare;
+//	uint32_t time_up;
+//	uint32_t time_dow;
 } user_info_t;
 #pragma pack()
 
 user_info_t user, user_before, compare_user, write_user, send_user;
 
-extern uint8_t g_uart_request_exit;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -151,11 +165,15 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
 		{
 		case 0x44: //Data: D
 			wcode = uart_data[1]<<24|uart_data[2]<<16|uart_data[3]<<8|uart_data[4];
-			if (!write_mode && !write_mode_somecard)
+			if (!write_mode && !write_mode_somecard && !write_card_by_hand)
 			{
 				sendData_eth("D", wcode);
 				isSendDataEth = true;
 				timeSendDataEth = HAL_GetTick();
+			}
+			if (write_card_by_hand)
+			{
+				new_wcode = true;
 			}
 			break;
 		case 0x43://Comand: C
@@ -178,7 +196,6 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
 			{
 				Ethernet_setting_data[i] = uart_data[i+1];
 			}
-			g_uart_request_exit = 1;
 			break;
 		case 0x52://Read R
 			if (uart_data[1] == 0x01)
@@ -187,7 +204,6 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
 				  Ethernet_read_and_reset_data = uart_data[1];
 				  send_uart_to_PC = true;
 			}
-			g_uart_request_exit = 1;
 			break;
 		case 0x57: // W
 			switch (uart_data[1])
@@ -197,32 +213,40 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
 				time_break = HAL_GetTick();
 				send_uart_to_PC = true;
 				add_card_uart = true;
-				g_uart_request_exit = 1;
 				break;
 			case 0x45:// E: errase
 				write_mode = true;
 				time_break = HAL_GetTick();
 				send_uart_to_PC = true;
 				add_card_uart = true;
-				g_uart_request_exit = 1;
 				break;
 			case 0x44:
-				  write_user.STT++;
-				  write_user.cardID =  uart_data[2]<<24|uart_data[3]<<16|uart_data[4]<<8|uart_data[5];
-				  write_user.permis[0] = uart_data[6];
-				  write_user.permis[1] = uart_data[7];
-				  write_user.permis[2] = uart_data[8];
-				  write_user.permis[3] = uart_data[9];
-				  write_user.permis[4] = uart_data[10];
-				  write_user.permis[5] = uart_data[11];
-				  write_user.permis[6] = uart_data[12];
-				  write_user.permis[7] = uart_data[13];
-				  new_card = true;
-				  send_uart_to_PC = true;
+				write_user.STT++;
+				write_user.cardID =  uart_data[2]<<24|uart_data[3]<<16|uart_data[4]<<8|uart_data[5];
+				write_user.permis[0] = uart_data[6];
+				write_user.permis[1] = uart_data[7];
+				write_user.permis[2] = uart_data[8];
+				write_user.permis[3] = uart_data[9];
+				write_user.permis[4] = uart_data[10];
+				write_user.permis[5] = uart_data[11];
+				write_user.permis[6] = uart_data[12];
+				write_user.permis[7] = uart_data[13];
+				write_user.beginDate = buf[14];
+				write_user.beginMonth = buf[15];
+				write_user.beginYear = buf[16]<<8 | buf[17];
+				write_user.beginHour = buf[18];
+				write_user.beginMinute = buf[19];
+				write_user.endDate = buf[20];
+				write_user.endMonth = buf[21];
+				write_user.endYear = buf[22]<<8 | buf[23];
+				write_user.endHour = buf[24];
+				write_user.endMinute = buf[25];
+				new_card = true;
+				send_uart_to_PC = true;
 				break;
 			case 0x43:
-				  write_done = true;
-				  send_uart_to_PC = true;
+				write_done = true;
+				send_uart_to_PC = true;
 				break;
 			}
 			break;
@@ -420,7 +444,7 @@ int main(void)
 //  W25Q_EraseChip();
   while(user.STT!=0xFFFFFFFF)
   {
-	  W25Q_FastRead_address(number_card*24, sizeof(user_info_t), (uint8_t *)&user);
+	  W25Q_FastRead_address(number_card*sizeof(user_info_t), sizeof(user_info_t), (uint8_t *)&user);
 	  if (user.STT -1 == number_card)
 	  {
 		  number_card = user.STT;
@@ -428,7 +452,7 @@ int main(void)
   }
   while(user_before.STT!=0xFFFFFFFF)
   {
-	  W25Q_FastRead_address(number_card_old*24, sizeof(user_info_t), (uint8_t *)&user_before);
+	  W25Q_FastRead_address(number_card_old*sizeof(user_info_t) + Block32, sizeof(user_info_t), (uint8_t *)&user_before);
 	  if (user_before.STT -1 == number_card_old)
 	  {
 		  number_card_old = user_before.STT;
@@ -436,13 +460,13 @@ int main(void)
   }
   if (number_card_old > 0)
   {
-	  for (uint32_t i=0; i<((number_card_old*24/(16*256))+2); i++)
+	  for (uint32_t i=0; i<(number_card_old*sizeof(user_info_t)/Sector +2); i++)
 	  {
-		  W25Q_Erase_Sector(i+16*33);
+		  W25Q_Erase_Sector(i + Block32/256);
 	  }
   }
   wiz_NetInfo gWIZNETINFO = {
-  		  .mac = {0x00, 0x1c, 0x16, ip4, 0xFF-ip4, ip4*ip4},
+  		  .mac = {0x00, 0x1c, 0x16, 0, 0, 0},
   		  .ip = {ip1,ip2,ip3,ip4},
   		  .sn = {255, 255, 255, 0},
   		  .gw = {192, 168, 0, 1},
@@ -452,9 +476,9 @@ int main(void)
   server_ip[1] = ip_server2;
   server_ip[2] = ip_server3;
   server_ip[3] = ip_server4;
-  gWIZNETINFO.mac[3] = ((HAL_GetUIDw0()>>24)&0xFF) + ((HAL_GetUIDw2()>>16)&0xFF) + ((HAL_GetUIDw1()>>8)&0xFF) + (HAL_GetUIDw0()&0xFF);
-  gWIZNETINFO.mac[4] = ((HAL_GetUIDw1()>>24)&0xFF) + ((HAL_GetUIDw0()>>16)&0xFF) + ((HAL_GetUIDw2()>>8)&0xFF) + (HAL_GetUIDw2()&0xFF);
-  gWIZNETINFO.mac[5] = ((HAL_GetUIDw2()>>24)&0xFF) + ((HAL_GetUIDw1()>>16)&0xFF) + ((HAL_GetUIDw0()>>8)&0xFF) + (HAL_GetUIDw1()&0xFF);
+  gWIZNETINFO.mac[3] = (HAL_GetUIDw0()^ip4)&0xFF;
+  gWIZNETINFO.mac[4] = (HAL_GetUIDw1()^ip4)&0xFF;
+  gWIZNETINFO.mac[5] = (HAL_GetUIDw2()^ip4)&0xFF;
   W5500Init();
   HAL_Delay(2000);
   wizchip_setnetinfo(&gWIZNETINFO);
@@ -463,7 +487,6 @@ int main(void)
   if (getSn_SR(SOCK_NUM) == SOCK_ESTABLISHED)
   {
 	  time_check = HAL_GetTick();
-	  time_auto_reconnect = HAL_GetTick();
 	  HAL_GPIO_WritePin(LED_STT_ETH_GPIO_Port, LED_STT_ETH_Pin, GPIO_PIN_SET);
   }
   Set_speed_can(elevator_mode);
@@ -480,7 +503,7 @@ int main(void)
 	  lenData = getSn_RX_RSR(SOCK_NUM);
 	  if (getSn_RX_RSR(SOCK_NUM) == lenData)
 	  {
-		  if (lenData > 1024)
+		  if (lenData > 512)
 		  {
 			  HAL_NVIC_SystemReset();
 		  }
@@ -491,7 +514,7 @@ int main(void)
 			  {
 			  case 0x48:
 				  connected = HAL_GetTick();
-				  time_now = mktime((buf[3]<<8) & buf[4], buf[2], buf[1], buf[5], buf[6]);
+				  timeNow = mktime((buf[3]<<8) & buf[4], buf[2], buf[1], buf[5], buf[6]);
 				  break;
 			  case 0x44://data: D
 				  Ethernet_received = true;
@@ -531,6 +554,10 @@ int main(void)
 					  break;
 				  case 0x41:// A: add card
 					  write_mode_somecard = true;
+					  time_break = HAL_GetTick();
+					  break;
+				  case 0x48:// H: add card by hand
+					  write_card_by_hand = true;
 					  time_break = HAL_GetTick();
 					  break;
 				  }
@@ -588,13 +615,15 @@ int main(void)
 
 	  // Nếu không nhận được Data từ server sau khi gửi mã thẻ, thì xử lý offline
 
-	  if (((isSendDataEth == true) && !Ethernet_connected) || ((isSendDataEth == true) && ((HAL_GetTick() - timeSendDataEth) > 500)))
+	  if ((isSendDataEth == true) && (!Ethernet_connected || ((HAL_GetTick() - timeSendDataEth) > 500)))
 	  {
 		  isSendDataEth = false;
 		  compare_user = binary_search(number_card, wcode);
 		  if (compare_user.STT)
 		  {
-			  if ((compare_user.time_up < time_now) && (compare_user.time_dow > time_now))
+			  timeBegin = mktime(compare_user.beginYear, compare_user.beginMonth, compare_user.beginDate, compare_user.beginHour, compare_user.beginMinute);
+			  timeEnd = mktime(compare_user.endYear, compare_user.endMonth, compare_user.endDate, compare_user.endHour, compare_user.endMinute);
+			  if ((timeBegin < timeNow) && (timeEnd > timeNow))
 			  {
 				  new_card_update(compare_user.permis, x, x_timer);
 				  send_uart = 1;
@@ -724,23 +753,15 @@ int main(void)
 
 	  while (send_card_to_pc)
 	  {
-		  if (number_card == 0)
+		  for (uint32_t i=0; i< number_card; i++)
 		  {
-//			  sendString("R", "EMPTY");
-			  send_u8_eth("X", 0);
-			  send_card_to_pc = false;
-		  } else
-		  {
-			  for (uint32_t i=0; i< number_card; i++)
-			  {
-				  W25Q_FastRead_address(i*24, sizeof(user_info_t), (uint8_t *)&send_user);
-				  sendData_eth_CardID ("X", send_user);
-				  HAL_Delay(100);
-			  }
-//					  sendString("R", "CMPLT");
-			  send_u8_eth("X", 1);
-			  send_card_to_pc = false;
+			  W25Q_FastRead_address(i*sizeof(user_info_t), sizeof(user_info_t), (uint8_t *)&send_user);
+			  sendData_eth_CardID ("X", send_user);
+			  HAL_Delay(100);
 		  }
+//					  sendString("R", "CMPLT");
+		  send_u8_eth("X", 1);
+		  send_card_to_pc = false;
 	  }
 	  while (write_mode)
 	  {
@@ -760,7 +781,7 @@ int main(void)
 			  lenData = getSn_RX_RSR(SOCK_NUM);
 			  if (getSn_RX_RSR(SOCK_NUM) == lenData)
 			  {
-				  if (lenData > 1024)
+				  if (lenData > 500)
 				  {
 					  HAL_NVIC_SystemReset();
 				  }
@@ -782,10 +803,17 @@ int main(void)
 							  write_user.permis[5] = buf[11];
 							  write_user.permis[6] = buf[12];
 							  write_user.permis[7] = buf[13];
-							  write_user.time_up = mktime((buf[16]<<8) | buf[17], buf[15], buf[14], buf[18], buf[19]);
-							  write_user.time_dow = mktime((buf[22]<<8) | buf[23], buf[21], buf[20], buf[24], buf[25]);
-
-							  W25Q_Write_Nbytes((totalCard-1)*24 + 0x210000, (uint8_t *)&write_user, sizeof(user_info_t));
+							  write_user.beginDate = buf[14];
+							  write_user.beginMonth = buf[15];
+							  write_user.beginYear = buf[16]<<8 | buf[17];
+							  write_user.beginHour = buf[18];
+							  write_user.beginMinute = buf[19];
+							  write_user.endDate = buf[20];
+							  write_user.endMonth = buf[21];
+							  write_user.endYear = buf[22]<<8 | buf[23];
+							  write_user.endHour = buf[24];
+							  write_user.endMinute = buf[25];
+							  W25Q_Write_Nbytes((totalCard-1)*sizeof(user_info_t) + Block32, (uint8_t *)&write_user, sizeof(user_info_t));
 							  sendString("W", "DOK");
 							  time_break = HAL_GetTick();
 						  } else if (buf[1] == 0x43)
@@ -801,25 +829,25 @@ int main(void)
 			  if (new_card)
 			  {
 				  totalCard++;
-				  W25Q_Write_Nbytes((totalCard-1)*24 + 0x210000, (uint8_t *)&write_user, sizeof(user_info_t));
+				  W25Q_Write_Nbytes((totalCard-1)*sizeof(user_info_t) + Block32, (uint8_t *)&write_user, sizeof(user_info_t));
 				  new_card = false;
 				  sendString_uart("WDOK");
 				  time_break = HAL_GetTick();
 			  }
 			  while (write_done)
 			  {
-				  for (uint8_t i=0; i<(number_card)*24/(16*256)+1; i++)
+				  for (uint8_t i=0; i<(number_card)*sizeof(user_info_t)/Sector+1; i++)
 				  {
 					  W25Q_Erase_Sector(i);
 				  }
 				  for (uint32_t i = 0; i<totalCard; i++)
 				  {
-					  W25Q_FastRead_address(i*24+ 0x210000, sizeof(user_info_t), (uint8_t *)&send_user);
-					  W25Q_Write_Nbytes(i*24, (uint8_t *)&send_user, sizeof(user_info_t));
+					  W25Q_FastRead_address(i*sizeof(user_info_t)+ Block32, sizeof(user_info_t), (uint8_t *)&send_user);
+					  W25Q_Write_Nbytes(i*sizeof(user_info_t), (uint8_t *)&send_user, sizeof(user_info_t));
 				  }
-				  for (uint32_t i=0; i<((totalCard*24/(16*256))+2); i++)
+				  for (uint32_t i=0; i<((totalCard*sizeof(user_info_t)/Sector)+1); i++)
 				  {
-					  W25Q_Erase_Sector(i+16*33);
+					  W25Q_Erase_Sector(i + Block32/256);
 				  }
 				  if (send_uart_to_PC)
 				  {
@@ -848,10 +876,6 @@ int main(void)
 		  } else
 		  {
 			  sendString("W", "AOK");
-			  HAL_Delay(50);
-			  sendString("W", "AOK");
-			  HAL_Delay(50);
-			  sendString("W", "AOK");
 		  }
 		  time_break = HAL_GetTick();
 		  bypass_from_Eth = true;
@@ -860,7 +884,7 @@ int main(void)
 			  lenData = getSn_RX_RSR(SOCK_NUM);
 			  if (getSn_RX_RSR(SOCK_NUM) == lenData)
 			  {
-				  if (lenData > 1024)
+				  if (lenData > 512)
 				  {
 					  HAL_NVIC_SystemReset();
 				  }
@@ -882,10 +906,17 @@ int main(void)
 							  write_user.permis[5] = buf[11];
 							  write_user.permis[6] = buf[12];
 							  write_user.permis[7] = buf[13];
-							  write_user.time_up = mktime((buf[16]<<8) | buf[17], buf[15], buf[14], buf[18], buf[19]);
-							  write_user.time_dow = mktime((buf[22]<<8) | buf[23], buf[21], buf[20], buf[24], buf[25]);
-
-							  W25Q_Write_Nbytes((add_card-1)*24 + 0x210000, (uint8_t *)&write_user, sizeof(user_info_t));
+							  write_user.beginDate = buf[14];
+							  write_user.beginMonth = buf[15];
+							  write_user.beginYear = buf[16]<<8 | buf[17];
+							  write_user.beginHour = buf[18];
+							  write_user.beginMinute = buf[19];
+							  write_user.endDate = buf[20];
+							  write_user.endMonth = buf[21];
+							  write_user.endYear = buf[22]<<8 | buf[23];
+							  write_user.endHour = buf[24];
+							  write_user.endMinute = buf[25];
+							  W25Q_Write_Nbytes((add_card-1)*sizeof(user_info_t) + Block63, (uint8_t *)&write_user, sizeof(user_info_t));
 							  sendString("W", "DOK");
 							  time_break = HAL_GetTick();
 						  } else if (buf[1] == 0x43)
@@ -901,7 +932,7 @@ int main(void)
 			  if (new_card)
 			  {
 				  add_card++;
-				  W25Q_Write_Nbytes((add_card-1)*24 + 0x210000, (uint8_t *)&write_user, sizeof(user_info_t));
+				  W25Q_Write_Nbytes((add_card-1)*sizeof(user_info_t) + Block63, (uint8_t *)&write_user, sizeof(user_info_t));
 				  new_card = false;
 				  sendString_uart("WDOK");
 				  time_break = HAL_GetTick();
@@ -911,11 +942,11 @@ int main(void)
 				  // ghi các thẻ hiện tại vào bộ nhớ đệm từ Block 33
 				  for (uint32_t i = 0; i<number_card; i++)
 				  {
-					  W25Q_FastRead_address(i*24, sizeof(user_info_t), (uint8_t *)&send_user);
-					  W25Q_Write_Nbytes(i*24 + 0x210000 + ((add_card*24/(16*256))+1)*0x1000, (uint8_t *)&send_user, sizeof(user_info_t));
+					  W25Q_FastRead_address(i*sizeof(user_info_t), sizeof(user_info_t), (uint8_t *)&send_user);
+					  W25Q_Write_Nbytes(i*sizeof(user_info_t) + Block32, (uint8_t *)&send_user, sizeof(user_info_t));
 				  }
 				  // xóa bộ nhớ ban đầu
-				  for (uint8_t i=0; i<(number_card)*24/(16*256)+1; i++)
+				  for (uint8_t i=0; i<(number_card*sizeof(user_info_t)/Sector+1); i++)
 				  {
 					  W25Q_Erase_Sector(i);
 				  }
@@ -924,46 +955,52 @@ int main(void)
 
 				  while (i < number_card && j < add_card)
 				  {
-					  W25Q_FastRead_address(i*24 + 0x210000 + ((add_card*24/(16*256))+1)*0x1000 , sizeof(user_info_t), (uint8_t *)&old_user);
-					  W25Q_FastRead_address(j*24 + 0x210000, sizeof(user_info_t), (uint8_t *)&new_user);
+					  W25Q_FastRead_address(i*sizeof(user_info_t) + Block32, sizeof(user_info_t), (uint8_t *)&old_user);
+					  W25Q_FastRead_address(j*sizeof(user_info_t) + Block63, sizeof(user_info_t), (uint8_t *)&new_user);
 					  if (old_user.cardID < new_user.cardID)
 					  {
 						  old_user.STT = k + 1;
-						  W25Q_Write_Nbytes(k*24, (uint8_t *)&old_user, sizeof(user_info_t));
+						  W25Q_Write_Nbytes(k*sizeof(user_info_t), (uint8_t *)&old_user, sizeof(user_info_t));
 						  i++; // Dịch chỉ số của mảng đã lấy
+						  k++;
 					  } else if (old_user.cardID > new_user.cardID)
 					  {
 						  new_user.STT = k + 1;
-						  W25Q_Write_Nbytes(k*24, (uint8_t *)&new_user, sizeof(user_info_t));
+						  W25Q_Write_Nbytes(k*sizeof(user_info_t), (uint8_t *)&new_user, sizeof(user_info_t));
 						  j++; // Dịch chỉ số của mảng đã lấy
+						  k++;
 					  } else if (old_user.cardID == new_user.cardID)
 					  {
 						  new_user.STT = k + 1;
-						  W25Q_Write_Nbytes(k*24, (uint8_t *)&new_user, sizeof(user_info_t));
+						  W25Q_Write_Nbytes(k*sizeof(user_info_t), (uint8_t *)&new_user, sizeof(user_info_t));
 						  j++; // Dịch chỉ số của mảng đã lấy
 						  i++;
+						  k++;
 					  }
-					  k++;
 				  }
 				  while (i < number_card)
 				  {
-					  W25Q_FastRead_address(i*24 + 0x210000 + ((add_card*24/(16*256))+1)*0x1000 , sizeof(user_info_t), (uint8_t *)&old_user);
+					  W25Q_FastRead_address(i*sizeof(user_info_t) + Block32, sizeof(user_info_t), (uint8_t *)&old_user);
 					  old_user.STT = k + 1;
-					  W25Q_Write_Nbytes(k*24, (uint8_t *)&old_user, sizeof(user_info_t));
+					  W25Q_Write_Nbytes(k*sizeof(user_info_t), (uint8_t *)&old_user, sizeof(user_info_t));
 					  i++;
 					  k++;
 				  }
 				  while (j < add_card)
 				  {
-					  W25Q_FastRead_address(j*24 + 0x210000, sizeof(user_info_t), (uint8_t *)&new_user);
+					  W25Q_FastRead_address(j*sizeof(user_info_t) + Block63, sizeof(user_info_t), (uint8_t *)&new_user);
 					  new_user.STT = k + 1;
-					  W25Q_Write_Nbytes(k*24, (uint8_t *)&new_user, sizeof(user_info_t));
+					  W25Q_Write_Nbytes(k*sizeof(user_info_t), (uint8_t *)&new_user, sizeof(user_info_t));
 					  j++;
 					  k++;
 				  }
-				  for (uint32_t i=0; i<((k*24/(16*256))+3); i++)
+				  for (uint32_t i=0; i<((number_card*sizeof(user_info_t)/Sector)+1); i++)
 				  {
-					  W25Q_Erase_Sector(i+16*33);
+					  W25Q_Erase_Sector(i + Block32/256);
+				  }
+				  for (uint32_t i=0; i<((add_card*sizeof(user_info_t)/Sector)+1); i++)
+				  {
+					  W25Q_Erase_Sector(i + Block63/256);
 				  }
 				  if (send_uart_to_PC)
 				  {
@@ -976,7 +1013,45 @@ int main(void)
 				  HAL_NVIC_SystemReset();
 			  }
 
-			  if ((abs(HAL_GetTick() - time_break) > Timeout_online))
+			  if (abs(HAL_GetTick() - time_break) > Timeout_online)
+			  {
+				  HAL_NVIC_SystemReset();
+			  }
+		  }
+	  }
+	  while (write_card_by_hand)
+	  {
+		  sendString("W", "HOK");
+		  time_break = HAL_GetTick();
+		  bypass_from_Eth = true;
+		  while (1)
+		  {
+			  lenData = getSn_RX_RSR(SOCK_NUM);
+			  if (getSn_RX_RSR(SOCK_NUM) == lenData)
+			  {
+				  if (lenData > 512)
+				  {
+					  HAL_NVIC_SystemReset();
+				  }
+				  if (lenData > 0)
+				  {
+					  recv(SOCK_NUM, buf, lenData);
+					  if (buf[0] == 0x57)
+					  {
+						  if (buf[1] == 0x43)
+						  {
+							  HAL_NVIC_SystemReset();
+						  }
+					  }
+				  }
+			  }
+			  if (new_wcode)
+			  {
+				  new_wcode = false;
+				  sendData_eth("H", wcode);
+				  time_break = HAL_GetTick();
+			  }
+			  if (abs(HAL_GetTick() - time_break) > Timeout_online)
 			  {
 				  HAL_NVIC_SystemReset();
 			  }
@@ -995,11 +1070,15 @@ int main(void)
 			  ip_server3 = 0;
 			  ip_server4 = 2;
 			  port_server = 6000;
+			  port_client = 0;
+			  time_delay = 1;
+			  elevator_mode = 0;
+			  W25Q_EraseChip();
 			  save_data();
 		  }
 		  HAL_NVIC_SystemReset();
 	  }
-	  if (counter_reset == 720)
+	  if (counter_reset == 10)
 	  {
 		  HAL_NVIC_SystemReset();
 	  }
@@ -1448,7 +1527,7 @@ void send_u8_eth (char *CMD, uint8_t data)
 void sendString (char *CMD, char *data)
 {
 //	char buf[10] = {0};
-	char cmd[5];
+	char cmd[20];
 	strcpy(cmd,CMD);
 	strcat(cmd, data);
 //	cmd[1] = (data&0xFF000000)>>24;
@@ -1472,19 +1551,14 @@ void sendData_eth_info (char *CMD, uint8_t *data)
 }
 void sendData_eth_CardID (char *CMD, user_info_t user)
 {
-	uint8_t cx[14];
-//	strcpy(cx,CMD);
-//	strcat(cx, data);
+	uint8_t size = sizeof(user_info_t)+2;
+	uint8_t cx[size];
 	cx[0] = CMD[0];
-//	cx[1] = user.STT>>24|0xFF;
-//	cx[2] = user.STT>>16|0xFF;
-//	cx[3] = user.STT>>8|0xFF;
-//	cx[4] = user.STT>>0|0xFF;
 	cx[1] = 2;
 	cx[2] = user.cardID>>24&0xFF;
 	cx[3] = user.cardID>>16&0xFF;
 	cx[4] = user.cardID>>8&0xFF;
-	cx[5] = user.cardID>>0&0xFF;
+	cx[5] = user.cardID&0xFF;
 	cx[6] = user.permis[0];
 	cx[7] = user.permis[1];
 	cx[8] = user.permis[2];
@@ -1493,7 +1567,19 @@ void sendData_eth_CardID (char *CMD, user_info_t user)
 	cx[11] = user.permis[5];
 	cx[12] = user.permis[6];
 	cx[13] = user.permis[7];
-	send(SOCK_NUM,(uint8_t *) cx, 14);
+	cx[14] = user.beginDate;
+	cx[15] = user.beginMonth;
+	cx[16] = user.beginYear>>8&0xFF;
+	cx[17] = user.beginYear&0xFF;
+	cx[18] = user.beginHour;
+	cx[19] = user.beginMinute;
+	cx[20] = user.endDate;
+	cx[21] = user.endMonth;
+	cx[22] = user.endYear>>8&0xFF;
+	cx[23] = user.endYear&0xFF;
+	cx[24] = user.endHour;
+	cx[25] = user.endMinute;
+	send(SOCK_NUM,(uint8_t *) cx, size);
 }
 void sendData_uart (char *CMD, uint8_t data)
 {
@@ -1680,6 +1766,7 @@ uint8_t reconect_eth(uint8_t sn)
 	if (Status_SN == SOCK_ESTABLISHED)
 	{
 		HAL_GPIO_WritePin(LED_STT_ETH_GPIO_Port, LED_STT_ETH_Pin, GPIO_PIN_SET);
+		counter_reset = 0;
 	}
 	return Status_SN;
 }
