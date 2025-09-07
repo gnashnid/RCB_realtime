@@ -466,7 +466,7 @@ int main(void)
 	  }
   }
   wiz_NetInfo gWIZNETINFO = {
-  		  .mac = {0x00, 0x1c, 0x16, 0, 0, 0},
+  		  .mac = {0x00, 0x1c, 0x16, (HAL_GetUIDw0()^ip4)&0xFF, (HAL_GetUIDw1()^ip4)&0xFF, (HAL_GetUIDw2()^ip4)&0xFF},
   		  .ip = {ip1,ip2,ip3,ip4},
   		  .sn = {255, 255, 255, 0},
   		  .gw = {192, 168, 0, 1},
@@ -476,19 +476,11 @@ int main(void)
   server_ip[1] = ip_server2;
   server_ip[2] = ip_server3;
   server_ip[3] = ip_server4;
-  gWIZNETINFO.mac[3] = (HAL_GetUIDw0()^ip4)&0xFF;
-  gWIZNETINFO.mac[4] = (HAL_GetUIDw1()^ip4)&0xFF;
-  gWIZNETINFO.mac[5] = (HAL_GetUIDw2()^ip4)&0xFF;
   W5500Init();
   HAL_Delay(2000);
   wizchip_setnetinfo(&gWIZNETINFO);
   socket(SOCK_NUM, Sn_MR_TCP, port_client, SF_TCP_NODELAY);
   connect(SOCK_NUM, server_ip, port_server);
-  if (getSn_SR(SOCK_NUM) == SOCK_ESTABLISHED)
-  {
-	  time_check = HAL_GetTick();
-	  HAL_GPIO_WritePin(LED_STT_ETH_GPIO_Port, LED_STT_ETH_Pin, GPIO_PIN_SET);
-  }
   Set_speed_can(elevator_mode);
   HAL_TIM_Base_Start_IT(&htim2);
   /* USER CODE END 2 */
@@ -721,7 +713,6 @@ int main(void)
 	  //// send data to PC, to keep alive connection
 	  if (!add_card_uart && (abs(HAL_GetTick() - time_check) > 5000))
 	  {
-		  time_check = HAL_GetTick();
 		  keepalive = reconect_eth(SOCK_NUM);
 		  if (keepalive == SOCK_ESTABLISHED)
 		  {
@@ -1078,7 +1069,7 @@ int main(void)
 		  }
 		  HAL_NVIC_SystemReset();
 	  }
-	  if (counter_reset == 10)
+	  if (counter_reset == 100)
 	  {
 		  HAL_NVIC_SystemReset();
 	  }
@@ -1748,26 +1739,25 @@ uint8_t reconect_eth(uint8_t sn)
 //	bool linkport = false;
 	uint8_t Status_SN;
 	Status_SN = getSn_SR(sn);
-	if ((Status_SN == SOCK_CLOSE_WAIT) || (wizphy_getphylink() == PHY_LINK_OFF))
-	{
-		HAL_GPIO_WritePin(LED_STT_ETH_GPIO_Port, LED_STT_ETH_Pin, GPIO_PIN_RESET);
-		disconnect(sn);
-		Status_SN = getSn_SR(sn);
-	}
-	if (wizphy_getphylink() == PHY_LINK_ON && Status_SN == SOCK_CLOSED)
-	{
-
-		HAL_GPIO_WritePin(LED_STT_ETH_GPIO_Port, LED_STT_ETH_Pin, GPIO_PIN_RESET);
-		socket(sn, Sn_MR_TCP, port_client, SF_TCP_NODELAY);
-		connect(sn, server_ip, port_server);
-		Status_SN = getSn_SR(sn);
-		counter_reset++;
-	}
+	time_check = HAL_GetTick();
 	if (Status_SN == SOCK_ESTABLISHED)
 	{
 		HAL_GPIO_WritePin(LED_STT_ETH_GPIO_Port, LED_STT_ETH_Pin, GPIO_PIN_SET);
 		counter_reset = 0;
+	} else if (wizphy_getphylink() == PHY_LINK_ON && Status_SN == SOCK_CLOSED)
+	{
+		HAL_GPIO_WritePin(LED_STT_ETH_GPIO_Port, LED_STT_ETH_Pin, GPIO_PIN_RESET);
+		socket(sn, Sn_MR_TCP, port_client, SF_TCP_NODELAY);
+		connect(sn, server_ip, port_server);
+		counter_reset++;
+		time_check -= 5000;
+	} else
+	{
+		HAL_GPIO_WritePin(LED_STT_ETH_GPIO_Port, LED_STT_ETH_Pin, GPIO_PIN_RESET);
+		close(sn);
+		time_check -= 5000;
 	}
+	Status_SN = getSn_SR(sn);
 	return Status_SN;
 }
 
