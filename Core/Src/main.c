@@ -139,8 +139,6 @@ void sendData_uart (char *CMD, uint8_t data);
 void sendData_eth_CardID (char *CMD, user_info_t user);
 void save_data();
 void sendString (char *CMD, char *data);
-void sendString_uart (char *CMD);
-void sendString_info_uart (uint8_t *CMD);
 //void write_sector (uint32_t Start_STT);
 user_info_t binary_search(uint32_t Number_card, uint32_t code);
 void new_card_update(uint8_t *data, bool *input, uint32_t *input_timer);
@@ -441,10 +439,7 @@ int main(void)
 			  {
 			  case 0x48:
 				  connected = HAL_GetTick();
-				  if (buf[4] |= 0)
-				  {
-					  timeNow = mktime((buf[3]<<8) & buf[4], buf[2], buf[1], buf[5], buf[6]);
-				  }
+				  timeNow = mktime((buf[3]<<8) & buf[4], buf[2], buf[1], buf[5], buf[6]);
 				  break;
 			  case 0x44://data: D
 				  Ethernet_received = true;
@@ -1380,30 +1375,35 @@ static void MX_GPIO_Init(void)
 /* USER CODE BEGIN 4 */
 void sendData_eth (char *CMD, uint32_t data)
 {
-	uint8_t cmd[6];
+	uint8_t cmd[7];
 	cmd[0] = CMD[0];
 	cmd[1] = data>>24&0xFF;
 	cmd[2] = data>>16&0xFF;
 	cmd[3] = data>>8&0xFF;
 	cmd[4] = data&0xFF;
-	send(SOCK_NUM,(uint8_t *) cmd, 5);
+	cmd[5] = 0x0D;
+	cmd[6] = 0x0A;
+	send(SOCK_NUM,(uint8_t *) cmd, 7);
 //	sendto(0, cmd, 5, server_ip,port_server);// send UDP
 }
 void send_u8_eth (char *CMD, uint8_t data)
 {
 //	char buf[10] = {0};
-	uint8_t cmd[2];
+	uint8_t cmd[4];
 	cmd[0] = CMD[0];
 	cmd[1] = data;
-	send(SOCK_NUM,(uint8_t *) cmd, 2);
+	cmd[2] = 0x0D;
+	cmd[3] = 0x0A;
+	send(SOCK_NUM,(uint8_t *) cmd, 4);
 //	sendto(0, cmd, 5, server_ip,port_server);// send UDP
 }
 void sendString (char *CMD, char *data)
 {
 //	char buf[10] = {0};
-	char cmd[20];
+	char cmd[strlen(data) + 3];
 	strcpy(cmd,CMD);
 	strcat(cmd, data);
+	strcat(cmd, "\r\n");
 //	cmd[1] = (data&0xFF000000)>>24;
 //	cmd[2] = (data&0x00FF0000)>>16;
 //	cmd[3] = (data&0x0000FF00)>>8;
@@ -1413,7 +1413,7 @@ void sendString (char *CMD, char *data)
 }
 void sendData_eth_info (char *CMD, uint8_t *data)
 {
-	char cx[27];
+	char cx[29];
 //	strcpy(cx,CMD);
 //	strcat(cx, data);
 	cx[0] = CMD[0];
@@ -1421,11 +1421,13 @@ void sendData_eth_info (char *CMD, uint8_t *data)
 	{
 		cx[i+1] = data[i];
 	}
-	send(SOCK_NUM,(uint8_t *) cx, 27);
+	cx[27] = 0x0D;
+	cx[28] = 0x0A;
+	send(SOCK_NUM,(uint8_t *) cx, 29);
 }
 void sendData_eth_CardID (char *CMD, user_info_t user)
 {
-	uint8_t size = sizeof(user_info_t)+2;
+	uint8_t size = sizeof(user_info_t)+4;
 	uint8_t cx[size];
 	cx[0] = CMD[0];
 	cx[1] = 2;
@@ -1453,49 +1455,23 @@ void sendData_eth_CardID (char *CMD, user_info_t user)
 	cx[23] = user.endYear&0xFF;
 	cx[24] = user.endHour;
 	cx[25] = user.endMinute;
+	cx[26] = 0x0D;
+	cx[27] = 0x0A;
 	send(SOCK_NUM,(uint8_t *) cx, size);
 }
+
 void sendData_uart (char *CMD, uint8_t data)
 {
-	char cmd[2];
+	char cmd[4];
 	cmd[0] = CMD[0];
 	cmd[1] = data;
-//	strcpy(cmd,CMD);
-//	strcat(cmd,data);
-	// Pull DE high to enable TX operation
-	HAL_GPIO_WritePin(DE_GPIO_Port, DE_Pin, GPIO_PIN_SET);
-	HAL_UART_Transmit(&huart1,(uint8_t *) cmd, 2, 500);
-	// Pull RE Low to enable RX operation
-	HAL_GPIO_WritePin(DE_GPIO_Port, DE_Pin, GPIO_PIN_RESET);
-}
-void sendString_uart (char *CMD)
-{
-	char cmd[2];
-	cmd[0] = CMD[0];
-	cmd[1] =  CMD[1];
-	cmd[2] =  CMD[2];
-	cmd[3] =  CMD[3];
+	cmd[2] = 0x0D;
+	cmd[3] = 0x0A;
 //	strcpy(cmd,CMD);
 //	strcat(cmd,data);
 	// Pull DE high to enable TX operation
 	HAL_GPIO_WritePin(DE_GPIO_Port, DE_Pin, GPIO_PIN_SET);
 	HAL_UART_Transmit(&huart1,(uint8_t *) cmd, 4, 500);
-	// Pull RE Low to enable RX operation
-	HAL_GPIO_WritePin(DE_GPIO_Port, DE_Pin, GPIO_PIN_RESET);
-}
-void sendString_info_uart (uint8_t *CMD)
-{
-	uint8_t cmd[27];
-	cmd[0] = 0x52;
-	for (uint8_t i=0; i<26; i++)
-	{
-		cmd[i+1] =  CMD[i];
-	}
-//	strcpy(cmd,CMD);
-//	strcat(cmd,data);
-	// Pull DE high to enable TX operation
-	HAL_GPIO_WritePin(DE_GPIO_Port, DE_Pin, GPIO_PIN_SET);
-	HAL_UART_Transmit(&huart1, cmd, 27, 1000);
 	// Pull RE Low to enable RX operation
 	HAL_GPIO_WritePin(DE_GPIO_Port, DE_Pin, GPIO_PIN_RESET);
 }
@@ -1709,18 +1685,23 @@ uint32_t mktime(uint16_t year, uint8_t month, uint8_t date, uint8_t hour, uint8_
 
     // 1. Cộng dồn số giây từ các năm đã qua
     // Giả sử epoch là 1/1/2000
-    for (i = EPOCH_YEAR; i < (year - EPOCH_YEAR); i++) {
-        time += (365 + is_leap_year(i)) * 24 * 60;
-    }
-
+	if (year >= 2000)
+	{
+		for (i = EPOCH_YEAR; i < (year - EPOCH_YEAR); i++) {
+			time += (365 + is_leap_year(i)) * 24 * 60;
+		}
+	}
     // 2. Cộng dồn số giây từ các tháng đã qua trong năm hiện tại
-    for (i = 0; i < month; i++) {
-        time += days_in_month[i] * 24 * 60;
-        // Cộng thêm một ngày nếu là tháng 2 của năm nhuận
-        if (i == 1 && is_leap_year(year)) {
-        	time += 24 * 3600;
-        }
-    }
+	if (month >= 1 && month <= 12)
+	{
+		for (i = 0; i < month; i++) {
+			time += days_in_month[i] * 24 * 60;
+			// Cộng thêm một ngày nếu là tháng 2 của năm nhuận
+			if (i == 1 && is_leap_year(year)) {
+				time += 24 * 3600;
+			}
+		}
+	}
 
     // 3. Cộng dồn số giây từ các ngày, giờ, phút và giây
     time += (uint32_t)(date - 1) * 24 * 60;
