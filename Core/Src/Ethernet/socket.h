@@ -144,6 +144,7 @@
 //A20150601 : For Integrating with W5300
 #define PACK_FIFOBYTE            0x02              ///< Valid only W5300, It indicate to have read already the Sn_RX_FIFOR.
 //
+extern uint8_t g_uart_request_exit; // Biến cờ báo hiệu yêu cầu thoát
 
 /**
  * @ingroup WIZnet_socket_APIs

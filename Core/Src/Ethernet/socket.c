@@ -65,8 +65,7 @@ static uint16_t sock_is_sending = 0;
 
 static uint16_t sock_remained_size[_WIZCHIP_SOCK_NUM_] = {0,0,};
 
-
-volatile uint8_t g_uart_request_exit = 0; // Biến cờ báo hiệu yêu cầu thoát
+uint8_t g_uart_request_exit = 0; // Biến cờ báo hiệu yêu cầu thoát
 
 
 //M20150601 : For extern decleation

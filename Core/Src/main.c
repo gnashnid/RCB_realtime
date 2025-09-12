@@ -47,7 +47,7 @@
 FLASH_EraseInitTypeDef EraseInit;
 #define SOCK_NUM 0
 #define Timeout_online 1000*10
-#define Timeout_heartbit 10000
+#define Timeout_heartbit 15000
 #define Page 256
 #define Sector 0x1000 //16*256
 #define Block32 0x200000
@@ -76,15 +76,14 @@ uint8_t uart_data[50], buf[520], server_ip[4], time_delay, lock_default[8], ip1,
 		ip_server1, ip_server2, ip_server3, ip_server4, data_info[30], elevator_mode, uart_bypass = 3,
 		data_MC2B[8], c[2]={0x48, 0}, keepalive, Ethernet_received_data[9],
 		Ethernet_setting_data[25], Ethernet_read_and_reset_data, counter_start, RxData[8], send_uart;
-uint16_t port_server, port_client;
+uint16_t port_server, port_client, yearNow;
 uint32_t SectorError, wcode, TxMailbox, x_timer[64], number_card, connected, time_break, lenData, number_card_old,
-		 lock_default_1, lock_default_2, time_check, heardbit_REB, timeSendDataEth,
+		 lock_default_1, lock_default_2, time_check, heardbit_REB, timeSendDataEth, timeBreak,
 		 RST_timer, RST_timer_now, RST_timer_last, count_RST, counter_reset, timeNow, timeBegin, timeEnd;
 bool bypass_from_REB, bypass_from_Eth, x[64], Ethernet_connected, isSendDataEth, write_mode_somecard,
 	 write_mode, write_done, new_card, send_card_to_pc, send_card_done, new_wcode,
 	 REB_connected = true, Ethernet_received, Ethernet_setting, add_card_uart, write_card_by_hand,
 	 Ethernet_read_and_reset, RST_set, unlock_fire, send_uart_to_REB, send_uart_to_PC;
-
 
 // Định nghĩa năm epoch (ví dụ: 1/1/2000 00:00:00)
 #define EPOCH_YEAR 2020
@@ -259,6 +258,10 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 	if (htim->Instance == htim3.Instance)
 	{
 		HAL_IWDG_Refresh(&hiwdg);
+		if (HAL_GetTick() - timeBreak > 200)
+		{
+			g_uart_request_exit = 1;
+		}
 		if (!RST_set)
 		{
 			HAL_GPIO_TogglePin(LED_STT_GPIO_Port, LED_STT_Pin);
@@ -439,7 +442,8 @@ int main(void)
 			  {
 			  case 0x48:
 				  connected = HAL_GetTick();
-				  timeNow = mktime((buf[3]<<8) & buf[4], buf[2], buf[1], buf[5], buf[6]);
+				  yearNow = (buf[3]<<8) | buf[4];
+				  timeNow = mktime(yearNow, buf[2], buf[1], buf[5], buf[6]);
 				  break;
 			  case 0x44://data: D
 				  Ethernet_received = true;
@@ -540,24 +544,31 @@ int main(void)
 
 	  // Nếu không nhận được Data từ server sau khi gửi mã thẻ, thì xử lý offline
 
-	  if ((isSendDataEth == true) && (!Ethernet_connected || ((HAL_GetTick() - timeSendDataEth) > 500)))
+	  if (isSendDataEth)
 	  {
-		  isSendDataEth = false;
-		  compare_user = binary_search(number_card, wcode);
-		  if (compare_user.STT)
+		  if (!Ethernet_connected || ((HAL_GetTick() - timeSendDataEth) > 500))
 		  {
-			  timeBegin = mktime(compare_user.beginYear, compare_user.beginMonth, compare_user.beginDate, compare_user.beginHour, compare_user.beginMinute);
-			  timeEnd = mktime(compare_user.endYear, compare_user.endMonth, compare_user.endDate, compare_user.endHour, compare_user.endMinute);
-			  if ((timeBegin < timeNow) && (timeEnd > timeNow))
+			  isSendDataEth = false;
+			  compare_user = binary_search(number_card, wcode);
+			  if (compare_user.STT > 0 && compare_user.STT <= number_card)
 			  {
-				  new_card_update(compare_user.permis, x, x_timer);
-				  send_uart = 1;
+//				  timeBegin = mktime(compare_user.beginYear, compare_user.beginMonth, compare_user.beginDate, compare_user.beginHour, compare_user.beginMinute);
+//				  timeEnd = mktime(compare_user.endYear, compare_user.endMonth, compare_user.endDate, compare_user.endHour, compare_user.endMinute);
+//				  if ((timeBegin < timeNow) && (timeNow < timeEnd) && (timeBegin != 0) && (timeEnd != 0) && (timeNow != 0))
+//				  {
+					  new_card_update(compare_user.permis, x, x_timer);
+					  send_uart = 1;
+					  send_uart_to_REB = true;
+//				  } else
+//				  {
+//					  send_uart = 0;
+//					  send_uart_to_REB = true;
+//				  }
+			  } else
+			  {
+				  send_uart = 0;
 				  send_uart_to_REB = true;
 			  }
-		  } else
-		  {
-			  send_uart = 0;
-			  send_uart_to_REB = true;
 		  }
 	  }
 	  //// setting from PC Ethernet
@@ -945,10 +956,6 @@ int main(void)
 			  W25Q_EraseChip();
 			  save_data();
 		  }
-		  HAL_NVIC_SystemReset();
-	  }
-	  if (counter_reset == 100)
-	  {
 		  HAL_NVIC_SystemReset();
 	  }
 	  HAL_Delay(10);
@@ -1427,7 +1434,7 @@ void sendData_eth_info (char *CMD, uint8_t *data)
 }
 void sendData_eth_CardID (char *CMD, user_info_t user)
 {
-	uint8_t size = sizeof(user_info_t)+4;
+	uint8_t size = sizeof(user_info_t);
 	uint8_t cx[size];
 	cx[0] = CMD[0];
 	cx[1] = 2;
@@ -1457,7 +1464,7 @@ void sendData_eth_CardID (char *CMD, user_info_t user)
 	cx[25] = user.endMinute;
 	cx[26] = 0x0D;
 	cx[27] = 0x0A;
-	send(SOCK_NUM,(uint8_t *) cx, size);
+	send(SOCK_NUM,(uint8_t *) cx, 28);
 }
 
 void sendData_uart (char *CMD, uint8_t data)
@@ -1499,12 +1506,14 @@ void save_data()
 user_info_t binary_search(uint32_t Number_card, uint32_t code)
 {
 	uint32_t low = 1, high = Number_card;
-	user_info_t user_0={0}, user_compare;
+	user_info_t user_compare;
 
-    while (low <= high) {
+    while (low <= high)
+    {
     	uint32_t mid = (low + high) / 2;
 		W25Q_FastRead((mid-1)/16, ((mid-1)%16)*sizeof(user_info_t), sizeof(user_info_t), (uint8_t *)&user_compare);
-        if (user_compare.cardID == code) {
+        if (user_compare.cardID == code)
+        {
             return user_compare;
         } else if (user_compare.cardID < code) {
             low = mid + 1;
@@ -1512,7 +1521,8 @@ user_info_t binary_search(uint32_t Number_card, uint32_t code)
             high = mid - 1;
         }
     }
-    return user_0;
+    user_compare.STT = 0;
+    return user_compare;
 }
 void new_card_update(uint8_t *data, bool *input, uint32_t *input_timer)
 {
@@ -1602,13 +1612,15 @@ uint8_t reconect_eth(uint8_t sn)
 	if (Status_SN == SOCK_CLOSE_WAIT || wizphy_getphylink() == PHY_LINK_OFF)
 	{
 		HAL_GPIO_WritePin(LED_STT_ETH_GPIO_Port, LED_STT_ETH_Pin, GPIO_PIN_RESET);
+		timeBreak = HAL_GetTick();
 		close(sn);
 		time_check -= 5000;
 	}
-	if (wizphy_getphylink() == PHY_LINK_ON && Status_SN == SOCK_CLOSED)
+	if (wizphy_getphylink() == PHY_LINK_ON && Status_SN == SOCK_CLOSED)// && (counter_reset < 1))
 	{
 		HAL_GPIO_WritePin(LED_STT_ETH_GPIO_Port, LED_STT_ETH_Pin, GPIO_PIN_RESET);
-		socket(sn, Sn_MR_TCP, port_client, SF_TCP_NODELAY);
+		socket(sn, Sn_MR_TCP, port_client, SF_TCP_NODELAY | Sn_MR_ND);
+		timeBreak = HAL_GetTick();
 		connect(sn, server_ip, port_server);
 		counter_reset++;
 		time_check -= 5000;
@@ -1685,11 +1697,14 @@ uint32_t mktime(uint16_t year, uint8_t month, uint8_t date, uint8_t hour, uint8_
 
     // 1. Cộng dồn số giây từ các năm đã qua
     // Giả sử epoch là 1/1/2000
-	if (year >= 2000)
+	if (year >= EPOCH_YEAR)
 	{
 		for (i = EPOCH_YEAR; i < (year - EPOCH_YEAR); i++) {
 			time += (365 + is_leap_year(i)) * 24 * 60;
 		}
+	} else
+	{
+		return 0;
 	}
     // 2. Cộng dồn số giây từ các tháng đã qua trong năm hiện tại
 	if (month >= 1 && month <= 12)
@@ -1701,13 +1716,15 @@ uint32_t mktime(uint16_t year, uint8_t month, uint8_t date, uint8_t hour, uint8_
 				time += 24 * 3600;
 			}
 		}
+	} else
+	{
+		return 0;
 	}
 
     // 3. Cộng dồn số giây từ các ngày, giờ, phút và giây
     time += (uint32_t)(date - 1) * 24 * 60;
     time += (uint32_t)hour * 60;
     time += (uint32_t)minute;
-
     return time;
 }
 /* USER CODE END 4 */
