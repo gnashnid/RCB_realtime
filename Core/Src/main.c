@@ -477,6 +477,9 @@ int main(void)
 			  case 0x57: // W
 				  switch (buf[1])
 				  {
+				  case 0x5A:// E: errase
+					  W25Q_EraseChip();
+					  break;
 				  case 0x45:// E: errase
 					  write_mode = true;
 					  time_break = HAL_GetTick();
@@ -552,18 +555,18 @@ int main(void)
 			  compare_user = binary_search(number_card, wcode);
 			  if (compare_user.STT > 0 && compare_user.STT <= number_card)
 			  {
-//				  timeBegin = mktime(compare_user.beginYear, compare_user.beginMonth, compare_user.beginDate, compare_user.beginHour, compare_user.beginMinute);
-//				  timeEnd = mktime(compare_user.endYear, compare_user.endMonth, compare_user.endDate, compare_user.endHour, compare_user.endMinute);
-//				  if ((timeBegin < timeNow) && (timeNow < timeEnd) && (timeBegin != 0) && (timeEnd != 0) && (timeNow != 0))
-//				  {
+				  timeBegin = mktime(compare_user.beginYear, compare_user.beginMonth, compare_user.beginDate, compare_user.beginHour, compare_user.beginMinute);
+				  timeEnd = mktime(compare_user.endYear, compare_user.endMonth, compare_user.endDate, compare_user.endHour, compare_user.endMinute);
+				  if ((timeBegin < timeNow) && (timeNow < timeEnd) && (timeBegin != 0) && (timeEnd != 0) && (timeNow != 0))
+				  {
 					  new_card_update(compare_user.permis, x, x_timer);
 					  send_uart = 1;
 					  send_uart_to_REB = true;
-//				  } else
-//				  {
-//					  send_uart = 0;
-//					  send_uart_to_REB = true;
-//				  }
+				  } else
+				  {
+					  send_uart = 0;
+					  send_uart_to_REB = true;
+				  }
 			  } else
 			  {
 				  send_uart = 0;
@@ -675,7 +678,7 @@ int main(void)
 
 	  while (send_card_to_pc)
 	  {
-		  HAL_Delay(1000);
+		  HAL_Delay(500);
 		  for (uint32_t i=0; i< number_card; i++)
 		  {
 			  W25Q_FastRead_address(i*sizeof(user_info_t), sizeof(user_info_t), (uint8_t *)&send_user);
@@ -956,6 +959,10 @@ int main(void)
 			  W25Q_EraseChip();
 			  save_data();
 		  }
+		  HAL_NVIC_SystemReset();
+	  }
+	  if (counter_reset == 700)
+	  {
 		  HAL_NVIC_SystemReset();
 	  }
 	  HAL_Delay(10);
@@ -1616,14 +1623,14 @@ uint8_t reconect_eth(uint8_t sn)
 		close(sn);
 		time_check -= 5000;
 	}
-	if (wizphy_getphylink() == PHY_LINK_ON && Status_SN == SOCK_CLOSED)// && (counter_reset < 1))
+	if (wizphy_getphylink() == PHY_LINK_ON && Status_SN == SOCK_CLOSED)
 	{
 		HAL_GPIO_WritePin(LED_STT_ETH_GPIO_Port, LED_STT_ETH_Pin, GPIO_PIN_RESET);
-		socket(sn, Sn_MR_TCP, port_client, SF_TCP_NODELAY | Sn_MR_ND);
+		socket(sn, Sn_MR_TCP, port_client, SF_TCP_NODELAY);
 		timeBreak = HAL_GetTick();
 		connect(sn, server_ip, port_server);
 		counter_reset++;
-		time_check -= 5000;
+		time_check -= 4000;
 	}
 	Status_SN = getSn_SR(sn);
 	if (Status_SN == SOCK_ESTABLISHED)
@@ -1693,13 +1700,13 @@ static uint8_t is_leap_year(uint16_t year)
 uint32_t mktime(uint16_t year, uint8_t month, uint8_t date, uint8_t hour, uint8_t minute)
 {
 	uint32_t time = 0;
-	uint32_t i = 0;
+	uint32_t i;
 
     // 1. Cộng dồn số giây từ các năm đã qua
     // Giả sử epoch là 1/1/2000
 	if (year >= EPOCH_YEAR)
 	{
-		for (i = EPOCH_YEAR; i < (year - EPOCH_YEAR); i++) {
+		for (i = EPOCH_YEAR; i < year; i++) {
 			time += (365 + is_leap_year(i)) * 24 * 60;
 		}
 	} else
@@ -1713,7 +1720,7 @@ uint32_t mktime(uint16_t year, uint8_t month, uint8_t date, uint8_t hour, uint8_
 			time += days_in_month[i] * 24 * 60;
 			// Cộng thêm một ngày nếu là tháng 2 của năm nhuận
 			if (i == 1 && is_leap_year(year)) {
-				time += 24 * 3600;
+				time += 24 * 60;
 			}
 		}
 	} else
