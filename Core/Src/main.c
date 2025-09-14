@@ -258,7 +258,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 	if (htim->Instance == htim3.Instance)
 	{
 		HAL_IWDG_Refresh(&hiwdg);
-		if (HAL_GetTick() - timeBreak > 200)
+		if (HAL_GetTick() - timeBreak > 300)
 		{
 			g_uart_request_exit = 1;
 		}
@@ -415,8 +415,8 @@ int main(void)
   W5500Init();
   HAL_Delay(2000);
   wizchip_setnetinfo(&gWIZNETINFO);
-  socket(SOCK_NUM, Sn_MR_TCP, port_client, SF_TCP_NODELAY);
-  connect(SOCK_NUM, server_ip, port_server);
+//  socket(SOCK_NUM, Sn_MR_TCP, port_client, SF_TCP_NODELAY);
+//  connect(SOCK_NUM, server_ip, port_server);
   Set_speed_can(elevator_mode);
   HAL_TIM_Base_Start_IT(&htim2);
   /* USER CODE END 2 */
@@ -1626,8 +1626,8 @@ uint8_t reconect_eth(uint8_t sn)
 	if (wizphy_getphylink() == PHY_LINK_ON && Status_SN == SOCK_CLOSED)
 	{
 		HAL_GPIO_WritePin(LED_STT_ETH_GPIO_Port, LED_STT_ETH_Pin, GPIO_PIN_RESET);
-		socket(sn, Sn_MR_TCP, port_client, SF_TCP_NODELAY);
 		timeBreak = HAL_GetTick();
+		socket(sn, Sn_MR_TCP, port_client, SF_TCP_NODELAY);
 		connect(sn, server_ip, port_server);
 		counter_reset++;
 		time_check -= 4000;

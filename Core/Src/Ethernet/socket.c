@@ -228,7 +228,14 @@ int8_t close(uint8_t sn)
 #endif 
 	setSn_CR(sn,Sn_CR_CLOSE);
    /* wait to process the command... */
-	while( getSn_CR(sn) );
+	while( getSn_CR(sn) )
+	{
+		if (g_uart_request_exit == 1)
+		{
+			g_uart_request_exit = 0; // Xóa cờ sau khi xử lý
+			return SOCKERR_TIMEOUT	; // Trả về mã lỗi tùy chỉnh
+		}
+	}
 	/* clear all interrupt of the socket. */
 	setSn_IR(sn, 0xFF);
 	//A20150401 : Release the sock_io_mode of socket n.
@@ -285,7 +292,14 @@ int8_t connect(uint8_t sn, uint8_t * addr, uint16_t port)
 	setSn_DIPR(sn,addr);
 	setSn_DPORT(sn,port);
 	setSn_CR(sn,Sn_CR_CONNECT);
-   while(getSn_CR(sn));
+   while(getSn_CR(sn))
+	{
+		if (g_uart_request_exit == 1)
+		{
+			g_uart_request_exit = 0; // Xóa cờ sau khi xử lý
+			return SOCKERR_TIMEOUT	; // Trả về mã lỗi tùy chỉnh
+		}
+	}
    if(sock_io_mode & (1<<sn)) return SOCK_BUSY;
    while(getSn_SR(sn) != SOCK_ESTABLISHED)
    {

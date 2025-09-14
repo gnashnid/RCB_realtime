@@ -80,7 +80,7 @@ uint8_t  WIZCHIP_READ(uint32_t AddrSel)
    }
    else																// burst operation
    {
-		spi_data[0] = (AddrSel & 0x00FF0000) >> 16;
+	   	   spi_data[0] = (AddrSel & 0x00FF0000) >> 16;
 		spi_data[1] = (AddrSel & 0x0000FF00) >> 8;
 		spi_data[2] = (AddrSel & 0x000000FF) >> 0;
 		WIZCHIP.IF.SPI._write_burst(spi_data, 3);
