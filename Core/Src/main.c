@@ -44,7 +44,7 @@
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
 
-FLASH_EraseInitTypeDef EraseInit;
+FLASH_EraseInitTypeDef flashRCB, flashTime;
 #define SOCK_NUM 0
 #define Timeout_online 1000*10
 #define Timeout_heartbit 15000
@@ -74,8 +74,9 @@ CAN_TxHeaderTypeDef TxHeader_MC2B;
 
 uint8_t uart_data[50], buf[520], server_ip[4], time_delay, lock_default[8], ip1, ip2, ip3, ip4,
 		ip_server1, ip_server2, ip_server3, ip_server4, data_info[30], elevator_mode, uart_bypass = 3,
-		data_MC2B[8], c[2]={0x48, 0}, keepalive, Ethernet_received_data[9],
-		Ethernet_setting_data[25], Ethernet_read_and_reset_data, counter_start, RxData[8], send_uart;
+		data_MC2B[8], c[8], keepalive, Ethernet_received_data[9],
+		Ethernet_setting_data[25], Ethernet_read_and_reset_data, counter_start, RxData[8], send_uart,
+		dateNow, monthNow, hourNow, minuteNow;
 uint16_t port_server, port_client, yearNow;
 uint32_t SectorError, wcode, TxMailbox, x_timer[64], number_card, connected, time_break, lenData, number_card_old,
 		 lock_default_1, lock_default_2, time_check, heardbit_REB, timeSendDataEth, timeBreak,
@@ -88,13 +89,26 @@ bool bypass_from_REB, bypass_from_Eth, x[64], Ethernet_connected, isSendDataEth,
 // Định nghĩa năm epoch (ví dụ: 1/1/2000 00:00:00)
 #define EPOCH_YEAR 2020
 // Số ngày trong các tháng (không tính năm nhuận)
-static const int days_in_month[] = {
-    31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31
-};
+static const int days_in_month[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
 
 //volatile bool ip_assigned = false;
 //
 //
+typedef struct {
+	uint8_t ip[4];
+	uint16_t port;
+	uint8_t ipServer[4];
+	uint16_t portServer;
+	uint8_t timeDelay;
+	uint8_t elevatorType;
+	uint32_t lock32F;
+	uint32_t lock64F;
+	uint16_t year;
+	uint8_t month;
+	uint8_t date;
+	uint8_t hour;
+	uint8_t minute;
+} rcb_t;
 typedef struct {
 	uint32_t STT;
 	uint32_t cardID;
@@ -116,7 +130,7 @@ typedef struct {
 #pragma pack()
 
 user_info_t user, user_before, compare_user, write_user, send_user;
-
+rcb_t rcb;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -138,6 +152,7 @@ void sendData_uart (char *CMD, uint8_t data);
 void sendData_eth_CardID (char *CMD, user_info_t user);
 void save_data();
 void sendString (char *CMD, char *data);
+void save_time();
 //void write_sector (uint32_t Start_STT);
 user_info_t binary_search(uint32_t Number_card, uint32_t code);
 void new_card_update(uint8_t *data, bool *input, uint32_t *input_timer);
@@ -335,10 +350,14 @@ int main(void)
   TxHeader_MC2B.StdId = 0;
   TxHeader_MC2B.TransmitGlobalTime = DISABLE;
 
-  EraseInit.TypeErase = FLASH_TYPEERASE_PAGES;
-  EraseInit.Banks = FLASH_BANK_1;
-  EraseInit.PageAddress =  0x0800FC00;
-  EraseInit.NbPages = 1;
+  flashRCB.TypeErase = FLASH_TYPEERASE_PAGES;
+  flashRCB.Banks = FLASH_BANK_1;
+  flashRCB.PageAddress =  0x0800FC00;
+  flashRCB.NbPages = 1;
+  flashTime.TypeErase = FLASH_TYPEERASE_PAGES;
+  flashTime.Banks = FLASH_BANK_1;
+  flashTime.PageAddress =  0x0800F800;
+  flashTime.NbPages = 1;
   ip1 = *(uint32_t *)(0x0800FC00);
   ip2 = *(uint32_t *)(0x0800FC04);
   ip3 = *(uint32_t *)(0x0800FC08);
@@ -353,6 +372,11 @@ int main(void)
   elevator_mode = *(uint32_t *)(0x0800FC2C);
   lock_default_1 = *(uint32_t *)(0x0800FC30);
   lock_default_2 = *(uint32_t *)(0x0800FC34);
+  dateNow = *(uint32_t *)(0x0800F800);
+  monthNow = *(uint32_t *)(0x0800F804);
+  yearNow = *(uint32_t *)(0x0800F808);
+  hourNow = *(uint32_t *)(0x0800F80C);
+  minuteNow = *(uint32_t *)(0x0800F810);
   if (ip1 == 0xFF) ip1 = 192;
   if (ip2 == 0xFF) ip2 = 168;
   if (ip3 == 0xFF) ip3 = 0;
@@ -433,6 +457,7 @@ int main(void)
 	  {
 		  if (lenData > 512)
 		  {
+			  save_time();
 			  HAL_NVIC_SystemReset();
 		  }
 		  if (lenData > 0)
@@ -443,6 +468,17 @@ int main(void)
 			  case 0x48:
 				  connected = HAL_GetTick();
 				  yearNow = (buf[3]<<8) | buf[4];
+				  monthNow = buf[2];
+				  hourNow = buf[5];
+				  minuteNow = buf[6];
+				  if (buf[1] > dateNow)
+				  {
+					  dateNow = buf[1];
+					  save_time();
+				  } else
+				  {
+					  dateNow = buf[1];
+				  }
 				  timeNow = mktime(yearNow, buf[2], buf[1], buf[5], buf[6]);
 				  break;
 			  case 0x44://data: D
@@ -505,7 +541,8 @@ int main(void)
 	  {
 		  if (HAL_CAN_AbortTxRequest(&hcan, TxMailbox) != HAL_OK)
 		  {
-			HAL_NVIC_SystemReset();
+			  save_time();
+			  HAL_NVIC_SystemReset();
 		  }
 	  }
 
@@ -557,7 +594,7 @@ int main(void)
 			  {
 				  timeBegin = mktime(compare_user.beginYear, compare_user.beginMonth, compare_user.beginDate, compare_user.beginHour, compare_user.beginMinute);
 				  timeEnd = mktime(compare_user.endYear, compare_user.endMonth, compare_user.endDate, compare_user.endHour, compare_user.endMinute);
-				  if ((timeBegin < timeNow) && (timeNow < timeEnd) && (timeBegin != 0) && (timeEnd != 0) && (timeNow != 0))
+				  if ((timeBegin <= timeNow) && (timeNow <= timeEnd))
 				  {
 					  new_card_update(compare_user.permis, x, x_timer);
 					  send_uart = 1;
@@ -596,6 +633,7 @@ int main(void)
 			  lock_default_1 = Ethernet_setting_data[15]|(Ethernet_setting_data[16]<<8)|(Ethernet_setting_data[17]<<16)|(Ethernet_setting_data[18]<<24);
 			  lock_default_2 = Ethernet_setting_data[19]|(Ethernet_setting_data[20]<<8)|(Ethernet_setting_data[21]<<16)|(Ethernet_setting_data[22]<<24);
 			  save_data();
+			  save_time();
 			  sendString("S", "OK");
 			  HAL_NVIC_SystemReset();
 			  break;
@@ -611,6 +649,7 @@ int main(void)
 		  switch (Ethernet_read_and_reset_data)
 		  {
 		  case 0:
+			  save_time();
 			  HAL_NVIC_SystemReset();
 			  break;
 		  case 1:
@@ -650,6 +689,7 @@ int main(void)
 		  keepalive = reconect_eth(SOCK_NUM);
 		  if (keepalive == SOCK_ESTABLISHED)
 		  {
+			  c[0] = 0x48;
 			  if (unlock_fire)
 			  {
 				  c[1] = 0x46;//F
@@ -672,7 +712,13 @@ int main(void)
 			  {
 				  c[1] = 0x52;//r
 			  }
-			  send(SOCK_NUM, c, 2);
+			  c[2] = dateNow;
+			  c[3] = monthNow;
+			  c[4] = yearNow>>8;
+			  c[5] = yearNow&0xFF;
+			  c[6] = hourNow;
+			  c[7] = minuteNow;
+			  send(SOCK_NUM, c, 8);
 		  }
 	  }
 
@@ -702,6 +748,7 @@ int main(void)
 			  {
 				  if (lenData > 500)
 				  {
+					  save_time();
 					  HAL_NVIC_SystemReset();
 				  }
 				  if (!add_card_uart && (lenData > 0))
@@ -761,11 +808,13 @@ int main(void)
 					  W25Q_Erase_Sector(i + Block32/0x1000);
 				  }
 				  sendString("W", "COK");
+				  save_time();
 				  HAL_NVIC_SystemReset();
 			  }
 
 			  if ((abs(HAL_GetTick() - time_break) > Timeout_online))
 			  {
+				  save_time();
 				  HAL_NVIC_SystemReset();
 			  }
 		  }
@@ -784,6 +833,7 @@ int main(void)
 			  {
 				  if (lenData > 512)
 				  {
+					  save_time();
 					  HAL_NVIC_SystemReset();
 				  }
 				  if (!add_card_uart && (lenData > 0))
@@ -893,11 +943,13 @@ int main(void)
 					  W25Q_Erase_Sector(i + Block63/0x1000);
 				  }
 				  sendString("W", "COK");
+				  save_time();
 				  HAL_NVIC_SystemReset();
 			  }
 
 			  if (abs(HAL_GetTick() - time_break) > Timeout_online)
 			  {
+				  save_time();
 				  HAL_NVIC_SystemReset();
 			  }
 		  }
@@ -914,6 +966,7 @@ int main(void)
 			  {
 				  if (lenData > 512)
 				  {
+					  save_time();
 					  HAL_NVIC_SystemReset();
 				  }
 				  if (lenData > 0)
@@ -923,6 +976,7 @@ int main(void)
 					  {
 						  if (buf[1] == 0x43)
 						  {
+							  save_time();
 							  HAL_NVIC_SystemReset();
 						  }
 					  }
@@ -936,6 +990,7 @@ int main(void)
 			  }
 			  if (abs(HAL_GetTick() - time_break) > Timeout_online)
 			  {
+				  save_time();
 				  HAL_NVIC_SystemReset();
 			  }
 		  }
@@ -958,11 +1013,13 @@ int main(void)
 			  elevator_mode = 0;
 			  W25Q_EraseChip();
 			  save_data();
+			  save_time();
 		  }
 		  HAL_NVIC_SystemReset();
 	  }
 	  if (counter_reset == 700)
 	  {
+		  save_time();
 		  HAL_NVIC_SystemReset();
 	  }
 	  HAL_Delay(10);
@@ -1492,7 +1549,7 @@ void sendData_uart (char *CMD, uint8_t data)
 void save_data()
 {
 	HAL_FLASH_Unlock();
-	HAL_FLASHEx_Erase(&EraseInit, &SectorError);
+	HAL_FLASHEx_Erase(&flashRCB, &SectorError);
 	HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, 0x0800FC00, ip1);
 	HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, 0x0800FC04, ip2);
 	HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, 0x0800FC08, ip3);
@@ -1507,6 +1564,17 @@ void save_data()
 	HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, 0x0800FC2C, elevator_mode);
 	HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, 0x0800FC30, lock_default_1);
 	HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, 0x0800FC34, lock_default_2);
+	HAL_FLASH_Lock();
+}
+void save_time()
+{
+	HAL_FLASH_Unlock();
+	HAL_FLASHEx_Erase(&flashTime, &SectorError);
+	HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, 0x0800F800, dateNow);
+	HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, 0x0800F804, monthNow);
+	HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, 0x0800F808, yearNow);
+	HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, 0x0800F80C, hourNow);
+	HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, 0x0800F810, minuteNow);
 	HAL_FLASH_Lock();
 }
 
@@ -1684,13 +1752,8 @@ void Set_speed_can(uint8_t speed)
 // Hàm kiểm tra năm nhuận
 static uint8_t is_leap_year(uint16_t year)
 {
-    if (year % 400 == 0) {
-        return 1;
-    }
-    if (year % 100 == 0) {
-        return 0;
-    }
-    if (year % 4 == 0) {
+    if ((year % 4 == 0 && year % 100 != 0) || (year % 400 == 0))
+    {
         return 1;
     }
     return 0;
@@ -1707,7 +1770,7 @@ uint32_t mktime(uint16_t year, uint8_t month, uint8_t date, uint8_t hour, uint8_
 	if (year >= EPOCH_YEAR)
 	{
 		for (i = EPOCH_YEAR; i < year; i++) {
-			time += (365 + is_leap_year(i)) * 24 * 60;
+			time += (uint32_t)(365 + is_leap_year(i)) * 24 * 60;
 		}
 	} else
 	{
@@ -1716,13 +1779,14 @@ uint32_t mktime(uint16_t year, uint8_t month, uint8_t date, uint8_t hour, uint8_
     // 2. Cộng dồn số giây từ các tháng đã qua trong năm hiện tại
 	if (month >= 1 && month <= 12)
 	{
-		for (i = 0; i < month; i++) {
-			time += days_in_month[i] * 24 * 60;
+		for (i = 0; i < month - 1; i++) {
+			time += (uint32_t)days_in_month[i] * 24 * 60;
 			// Cộng thêm một ngày nếu là tháng 2 của năm nhuận
-			if (i == 1 && is_leap_year(year)) {
-				time += 24 * 60;
-			}
 		}
+		 if (month > 2 && is_leap_year(year))
+		 {
+			 time += 24 * 60;
+		 }
 	} else
 	{
 		return 0;
