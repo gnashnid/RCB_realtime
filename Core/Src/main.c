@@ -385,7 +385,6 @@ int main(void)
   yearNow = *(uint32_t *)(0x0800F808);
   hourNow = *(uint32_t *)(0x0800F80C);
   minuteNow = *(uint32_t *)(0x0800F810);
-  timeNow = mktime(yearNow, monthNow, dateNow, hourNow, minuteNow);
   if (ip1 == 0xFF) ip1 = 192;
   if (ip2 == 0xFF) ip2 = 168;
   if (ip3 == 0xFF) ip3 = 0;
@@ -488,7 +487,6 @@ int main(void)
 				  {
 					  dateNow = buf[1];
 				  }
-				  timeNow = mktime(yearNow, monthNow, dateNow, hourNow, minuteNow);
 				  break;
 			  case 0x44://data: D
 				  Ethernet_received = true;
@@ -601,6 +599,7 @@ int main(void)
 			  compare_user = binary_search(number_card, wcode);
 			  if (compare_user.STT > 0 && compare_user.STT <= number_card)
 			  {
+				  timeNow = mktime(yearNow, monthNow, dateNow, hourNow, minuteNow);
 				  timeBegin = mktime(compare_user.beginYear, compare_user.beginMonth, compare_user.beginDate, compare_user.beginHour, compare_user.beginMinute);
 				  timeEnd = mktime(compare_user.endYear, compare_user.endMonth, compare_user.endDate, compare_user.endHour, compare_user.endMinute);
 				  if ((timeBegin <= timeNow) && (timeNow <= timeEnd))
