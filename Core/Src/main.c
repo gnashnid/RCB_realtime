@@ -281,6 +281,14 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 		{
 			HAL_GPIO_TogglePin(LED_STT_GPIO_Port, LED_STT_Pin);
 		}
+		//test
+//		if (HAL_GetTick() > 25000 && test)
+//		{
+//			test = false;
+//			wcode = 0x22222255;
+//			isSendDataEth = true;
+//			timeSendDataEth = HAL_GetTick();
+//		}
 	}
 }
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
@@ -377,6 +385,7 @@ int main(void)
   yearNow = *(uint32_t *)(0x0800F808);
   hourNow = *(uint32_t *)(0x0800F80C);
   minuteNow = *(uint32_t *)(0x0800F810);
+  timeNow = mktime(yearNow, monthNow, dateNow, hourNow, minuteNow);
   if (ip1 == 0xFF) ip1 = 192;
   if (ip2 == 0xFF) ip2 = 168;
   if (ip3 == 0xFF) ip3 = 0;
@@ -471,7 +480,7 @@ int main(void)
 				  monthNow = buf[2];
 				  hourNow = buf[5];
 				  minuteNow = buf[6];
-				  if (buf[1] > dateNow)
+				  if (buf[1] != dateNow)
 				  {
 					  dateNow = buf[1];
 					  save_time();
@@ -479,7 +488,7 @@ int main(void)
 				  {
 					  dateNow = buf[1];
 				  }
-				  timeNow = mktime(yearNow, buf[2], buf[1], buf[5], buf[6]);
+				  timeNow = mktime(yearNow, monthNow, dateNow, hourNow, minuteNow);
 				  break;
 			  case 0x44://data: D
 				  Ethernet_received = true;
